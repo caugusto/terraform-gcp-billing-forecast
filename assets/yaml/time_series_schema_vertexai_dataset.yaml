@@ -1,0 +1,28 @@
+title: TimeSeries
+type: object
+description: Test
+properties:
+  inputConfig:
+    description: Test
+    oneOf:
+    - type: object
+      properties:
+        type: 
+          type: string
+          enum: bigquery_source
+        bigquery_uri: 
+          type: string
+          description: The URI of a BigQuery table.
+    discriminator:
+      propertyName: type
+  timeSeriesIdentifierColumn: 
+    type: string
+    description: >
+      The column name of the time series identifier column that identifies the
+      time series.
+  timeColumn: 
+    type: string
+    description: >
+      The column name of the time column that identifies time order in the time
+      series.
+
