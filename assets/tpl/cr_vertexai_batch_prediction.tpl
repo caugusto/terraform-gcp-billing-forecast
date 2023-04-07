@@ -14,5 +14,4 @@
     }
   },
   "generateExplanation": true
-
 }

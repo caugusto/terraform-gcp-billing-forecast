@@ -1,0 +1,225 @@
+
+main:
+    params: []
+    steps:
+    - init:
+        assign:
+          - workflow_id: $${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
+          - project_id: $${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+
+###################
+# Variables below are dynamically replaced based on the terraform script parameters
+          - region: ${par_region}
+          - vertexai_dataset: ${par_vertexai_dataset}
+          - vertexai_training_name: ${par_vertexai_training_name}
+          - vertexai_prediction_name: ${par_vertexai_prediction_name}
+          - bq_dataset: ${par_bq_dataset}
+          - bq_looker_view_name: ${par_bq_looker_view_name}
+          - bq_training_view_name: ${par_bq_training_view_name}
+          - bq_prediction_view_name: ${par_bq_prediction_view_name}
+
+##################
+
+          - vertexai_create_dataset_url: '$${"https://"+region+"-aiplatform.googleapis.com/v1/projects/"+project_id+"/locations/"+region+"/datasets"}'
+          - vertexai_create_training_url: '$${"https://"+region+"-aiplatform.googleapis.com/v1/projects/"+project_id+"/locations/"+region+"/trainingPipelines"}' 
+          - vertexai_create_batchprediction_url: '$${"https://"+region+"-aiplatform.googleapis.com/v1/projects/"+project_id+"/locations/"+region+"/batchPredictionJobs"}'
+          - bq_training_source: '$${"bq://"+project_id+"."+bq_dataset+"."+bq_training_view_name}'
+          - bq_prediction_source: '$${"bq://"+project_id+"."+bq_dataset+"."+bq_prediction_view_name}'
+          - bq_prediction_output: '$${"bq://"+project_id+"."+bq_dataset}'
+
+          - progress_Map: {"1.progress_Map": "Initialized Progress Map"}
+
+
+
+    - createVertexDataset:
+        call: http.post
+        args:
+            url: '$${vertexai_create_dataset_url}'
+            auth:
+                type: OAuth2
+            headers:
+                Content-Type: application/json; charset=utf-8
+            body:
+                {
+                    "display_name": "$${vertexai_dataset}",
+                    "metadata_schema_uri": "gs://google-cloud-aiplatform/schema/dataset/metadata/time_series_1.0.0.yaml",
+                    "metadata": {
+                    "input_config": {"bigquery_source" :{"uri": "$${bq_training_source}"}}
+                    }
+                }
+        result: datasetResultset
+    - getDatasetResult:    
+        assign:
+            - dataset_id: $${datasetResultset.body.name}
+            - dataset_id_parsed: $${text.replace_all_regex(dataset_id, "projects/.*/.*/.*/datasets/","")}
+            - dataset_id_parsed: $${text.replace_all_regex(dataset_id_parsed, "/operations/.*","")}
+
+    - sleepAfterDataset:    
+        call: sys.sleep
+        args:
+            seconds: 30
+
+    - setProgressMapStep2:    
+        assign: 
+            - progress_Map: {"2.progress_Map": "Initialized Vertex Dataset"}
+
+
+    - createVertexTraining:
+        call: http.post
+        args:
+            url: '$${vertexai_create_training_url}'
+            auth:
+                type: OAuth2
+            headers:
+                Content-Type: application/json; charset=utf-8
+            body:
+                {
+                    "displayName": "$${vertexai_training_name}",
+                    "trainingTaskDefinition": "gs://google-cloud-aiplatform/schema/trainingjob/definition/automl_forecasting_1.0.0.yaml",
+                    "trainingTaskInputs": {
+                        "targetColumn": "cost",
+                        "timeColumn": "date",
+                        "timeSeriesIdentifierColumn": "project_name",
+                        "time_series_attribute_columns": [],
+                        "available_at_forecast_columns": ["date"],
+                        "unavailable_at_forecast_columns": ["cost"],
+                        "trainBudgetMilliNodeHours": 1000,
+                        "dataGranularity": {"unit": "day", "quantity": 1},
+                        "forecast_horizon": 30,
+                        "context_window": 90,
+                        "optimizationObjective": "minimize-rmse",
+                        "transformations": [
+                            {"timestamp":  {"column_name" : "date"} },
+                            {"numeric":  {"column_name" : "cost"} }
+                        ]    
+                    },
+                    "modelToUpload": {"displayName": "$${vertexai_training_name}"},
+                    "inputDataConfig": {
+                    "datasetId": "$${dataset_id_parsed}"
+                    }
+                }
+        result: trainingResultset
+
+    - setTrainingResult:    
+        assign:
+            - training_pipeline_id: $${trainingResultset.body.name}
+            - training_status_url: '$${"https://"+region+"-aiplatform.googleapis.com/v1/" + training_pipeline_id}' 
+
+    - setProgressMapStep3:    
+        assign: 
+            - progress_Map: {"3.progress_Map": "Vertex Training Kicked Off"}
+
+    - waitForTrainingCompletion:
+        steps:
+            - checkJob:
+                call: http.get
+                args:
+                    url: '$${training_status_url}'
+                    auth:
+                        type: OAuth2
+                result: trainingStatusResultset
+            - checkIfDone:
+                switch:
+                - condition: $${trainingStatusResultset.body.state == "PIPELINE_STATE_SUCCEEDED"}
+                  next: getTrainingModelResult 
+            - waitingOnVertexAiTraining:
+                call: sys.sleep
+                args:
+                    seconds: 60
+                next: checkJob
+
+    - getTrainingModelResult:    
+        assign:
+            - training_model_name: $${trainingStatusResultset.body.modelToUpload.name}
+
+    - setProgressMapStep4:    
+        assign: 
+            - progress_Map: {"4.progress_Map": "Vertex Training Completed Successfully"}
+
+
+    - createVertexPrediction:
+        call: http.post
+        args:
+            url: '$${vertexai_create_batchprediction_url}'
+            auth:
+                type: OAuth2
+            headers:
+                Content-Type: application/json; charset=utf-8
+            body:
+                {
+                "displayName": "$${vertexai_prediction_name}",
+                "model": "$${training_model_name}",
+                "inputConfig": {
+                    "instancesFormat": "bigquery",
+                    "bigquerySource": {
+                    "inputUri": "$${bq_prediction_source}"
+                    }
+                },
+                "outputConfig": {
+                    "predictionsFormat": "bigquery",
+                    "bigqueryDestination": {
+                    "outputUri": "$${bq_prediction_output}"
+                    }
+                },
+                "generateExplanation": true
+                }
+        result: predictionResultset
+
+    - setPredictionResult:    
+        assign:
+            - prediction_outcome: $${predictionResultset.body}
+            - prediction_id: $${predictionResultset.body.name}
+            - prediction_status_url: '$${"https://"+region+"-aiplatform.googleapis.com/v1/" + prediction_id}'
+
+    - setProgressMapStep5:    
+        assign: 
+            - progress_Map: {"5.progress_Map": "Vertex Batch Prediction Kicked Off"}
+
+            
+    - waitForPredictionCompletion:
+        steps:
+            - checkPrediction:
+                call: http.get
+                args:
+                    url: '$${prediction_status_url}'
+                    auth:
+                        type: OAuth2
+                result: predictionStatusResultset
+            - checkIfPredictionDone:
+                switch:
+                - condition: $${predictionStatusResultset.body.state == "JOB_STATE_SUCCEEDED"}
+                  next: setProgressMapStep6 
+            - waitingOnVertexAiPrediction:
+                call: sys.sleep
+                args:
+                    seconds: 60
+                next: checkPrediction
+
+    - setProgressMapStep6:    
+        assign: 
+            - progress_Map: {"6.progress_Map": "Vertex Batch Prediction Completed Successfully"}
+
+
+    - setViewAliases:    
+        assign:
+            - b1: $${bq_dataset}
+            - b2: $${bq_looker_view_name}
+            - b3: $${bq_training_view_name}
+            
+    - CreateBQLookerView:
+        call: googleapis.bigquery.v2.jobs.query
+        args:
+          projectId: $${project_id}
+          body:
+            useLegacySql: false
+            query: '$${"create or replace view "+b1+"."+b2+" as select CAST(date as DATE) as date, project_name, CAST(cost as FLOAT64) as actual_cost, CAST(null as FLOAT64) as forecasted_cost from `"+b1+"."+b3+"` UNION ALL select CAST(date as DATE) as date, project_name, CAST(null as FLOAT64) as actual_cost, CAST(predicted_cost.value as FLOAT64) as forecasted_cost from `"+b1+".predictions_*`"}'
+        result: queryResult
+
+    - setProgressMapStep7:    
+        assign: 
+            - progress_Map: {"7.progress_Map": "View $${bq_looker_view_name} Created Successfully"}
+
+
+    - returnOutput:
+            return: $${progress_Map}
+            #return: $${training_pipeline_id2} 
