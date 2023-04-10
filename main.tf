@@ -292,13 +292,9 @@ data "http" "call_workflow_template_vertex_ai" {
 #}
 
 locals {
-  local_looker_studio = "Clone template xyz and replace datasource ..." 
-  end_msg = "Terraform script completed successfully. Please check https://lookerstudio.google.com/c/reporting/c8a62d54-9a68-44ca-8100-e95b1e19ca80/page/mPzLD for the latest build status"
+  end_msg = "Script completed successfully but VertexAI is still working in the background. Clone https://lookerstudio.google.com/c/reporting/c8a62d54-9a68-44ca-8100-e95b1e19ca80/page/mPzLD and update the datasource for the latest status"
 }
 
-output "out_local_studio" {
-  value =  local.local_looker_studio
-}
 
 output "out_end_msg" {
   value =  local.end_msg
