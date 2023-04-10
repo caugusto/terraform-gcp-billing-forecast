@@ -217,9 +217,11 @@ main:
 
     - setProgressMapStep7:    
         assign: 
-            - progress_Map: {"7.progress_Map": "View $${bq_looker_view_name} Created Successfully"}
+            - progress_Map: '$${"7.progress_Map: View " + bq_looker_view_name + " Created Successfully"}'
 
+    - setProgressMapStep8:    
+        assign: 
+            - progress_Map: '$${"8.progress_Map: Workflow " + workflow_id + " Executed Successfully"}'
 
     - returnOutput:
             return: $${progress_Map}
-            #return: $${training_pipeline_id2} 

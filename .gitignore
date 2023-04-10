@@ -50,3 +50,4 @@ credentials.json
 # Backup files
 *backup*
 test.txt
+*.orig

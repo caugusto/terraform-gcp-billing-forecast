@@ -136,7 +136,7 @@ resource "time_sleep" "wait_roles_activate" {
   google_project_iam_member.workflows_sa_log_writer,
   google_project_iam_member.workflows_sa_vertexai_user,
     ]
-  create_duration = "30s"
+  create_duration = "60s"
 }
 
 
@@ -170,6 +170,26 @@ resource "google_bigquery_table" "create_view_billing_summary" {
   
 }
 
+resource "time_sleep" "wait_billing_summary_view" {
+  depends_on      = [
+    google_bigquery_table.create_view_billing_summary
+    ]
+  create_duration = "30s"
+}
+
+
+data "template_file" "bq_template_prediction_sql" {
+  template = "${file("${path.module}/assets/sql/view_predict_billing_cost.sql")}"
+  vars = {
+    par_project_id = "${module.project-services.project_id}"
+    par_bq_dataset = "${var.bq_dataset_name}"
+    par_bq_training_view_name = "${var.bq_training_view_name}"
+    par_bq_public_billing_data = "${var.bq_public_billing_data}"
+  }
+  depends_on = [
+    time_sleep.wait_billing_summary_view
+  ]
+}
 
 resource "google_bigquery_table" "create_view_prediction_summary" {
   project         = module.project-services.project_id
@@ -178,11 +198,13 @@ resource "google_bigquery_table" "create_view_prediction_summary" {
 #  deletion_protection = false
  
   view {
-    query = file("${path.module}/assets/sql/view_predict_billing_cost.sql")
+    query = data.template_file.bq_template_prediction_sql.rendered
     use_legacy_sql = false
   }
   depends_on = [
-    google_bigquery_dataset.create_bq_dataset
+    google_bigquery_table.create_view_billing_summary,
+    time_sleep.wait_billing_summary_view,
+    data.template_file.bq_template_prediction_sql
   ]
   
 }
@@ -218,9 +240,9 @@ data "template_file" "workflow_template_vertex_ai" {
     par_bq_prediction_view_name = "${var.bq_prediction_view_name}"
   }
   depends_on = [
-    google_bigquery_table.create_view_looker
+    google_bigquery_table.create_view_looker,
+    time_sleep.wait_roles_activate
   ]
-
 }
 
 
@@ -233,7 +255,10 @@ resource "google_workflows_workflow" "workflow_template_vertex_ai" {
   source_contents = data.template_file.workflow_template_vertex_ai.rendered
    depends_on = [
     data.template_file.workflow_template_vertex_ai,
-    time_sleep.wait_roles_activate
+    time_sleep.wait_roles_activate,
+    google_bigquery_table.create_view_prediction_summary,
+    google_bigquery_table.create_view_looker,
+    google_bigquery_table.create_view_billing_summary
   ]
 }
 
@@ -255,10 +280,12 @@ data "http" "call_workflow_template_vertex_ai" {
     Accept = "application/json"
   Authorization = "Bearer ${data.google_client_config.current.access_token}" }
    depends_on = [
-        google_workflows_workflow.workflow_template_vertex_ai
+        google_workflows_workflow.workflow_template_vertex_ai,
+        time_sleep.wait_roles_activate
 
   ]
 }
+
 
 #output "output_call_workflow_template_vertex_ai" {
 #  value = data.http.call_workflow_template_vertex_ai.response_body
@@ -266,7 +293,7 @@ data "http" "call_workflow_template_vertex_ai" {
 
 locals {
   local_looker_studio = "Clone template xyz and replace datasource ..." 
-  end_msg = "Terraform script completed successfully"
+  end_msg = "Terraform script completed successfully. Please check https://lookerstudio.google.com/c/reporting/c8a62d54-9a68-44ca-8100-e95b1e19ca80/page/mPzLD for the latest build status"
 }
 
 output "out_local_studio" {

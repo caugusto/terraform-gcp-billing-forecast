@@ -78,13 +78,13 @@ variable "bq_looker_view_name" {
 variable "vertexai_dataset_name" {
   type        = string
   description = "Vertex AI dataset name"
-  default     = "gcpsolution_billforecast_dataset"
+  default     = "gcpsolution_billingforecast_dataset"
 }
 
 variable "vertexai_training_name" {
   type        = string
   description = "Vertex AI training job name"
-  default     = "gcpsolution_billforecast_training"
+  default     = "gcpsolution_billingforecast_training"
 }
 
 variable "vertexai_bq_datasource" {
@@ -96,11 +96,11 @@ variable "vertexai_bq_datasource" {
 variable "vertexai_prediction_name" {
   type        = string
   description = "Vertex AI batch prediction job name"
-  default     = "gcpsolution_billforecast_batchprediction"
+  default     = "gcpsolution_billingforecast_batchprediction"
 }
 
 variable "vertexai_workflow_name" {
   type        = string
   description = "Vertex AI workflow name"
-  default     = "gcpsolution_billforecast_workflow"
+  default     = "gcpsolution_billingforecast_workflow"
 }
